@@ -7,6 +7,7 @@
 
 #define MAX_SUCCESSORS    10
 #define MAX_PREDECESSORS  10
+#define MAX_DOMINATORS    10
 #define MAX_SPEC_LINE_LEN 128
 
 #define log(msg, ...)                           \
@@ -20,18 +21,25 @@
      __auto_type _b = (b);        \
      _a > _b ? _a : _b; })
 
+typedef int BBID;
+typedef int PoolOffset;
+
 typedef struct CFGNode {
-  int id;
+  BBID id;
   // An array of pointer offsets into the global memory block allocated for
   // all CFG nodes. The reason for storing indices rather than actual pointers
   // is that I don't know the max expected number of BB in the input program
   // and thus I use realloc which might move the originally allocated block
   // to a different place in memory invalidating old pointers.
-  int succs[MAX_SUCCESSORS];
+  PoolOffset succs[MAX_SUCCESSORS];
   int numSuccs;
 
-  int preds[MAX_PREDECESSORS];
+  PoolOffset preds[MAX_PREDECESSORS];
   int numPreds;
+
+  // dominators of the BB
+  PoolOffset doms[MAX_DOMINATORS];
+  int numDoms;
 } CFGNode, *CFGNodePtr;
 
 // The entry BB is stored as the first object of the pool.
@@ -40,7 +48,7 @@ static int currentPoolSize = 0;
 static int currentNumCFGNodes = 0;
 static char cfgSpecLine[MAX_SPEC_LINE_LEN];
 
-static CFGNodePtr getCFGNodeForBB(int bbID);
+static PoolOffset getCFGNodeForBB(BBID bbID);
 static void release_memory(CFGNodePtr bb);
 
 void parse_cgf_from_file(FILE *in) {
@@ -57,19 +65,22 @@ void parse_cgf_from_file(FILE *in) {
     }
 
     /* log("[tok: %s] ", tok); */
-    int srcID = strtol(tok, NULL, 10);
+    BBID srcBBID = strtol(tok, NULL, 10);
     /* log("%d: ", id); */
-    CFGNodePtr srcBB = getCFGNodeForBB(srcID);
+    PoolOffset srcBBOffset = getCFGNodeForBB(srcBBID);
+    CFGNode srcBB = cfgNodePool[srcBBOffset];
 
     while ((tok = strtok(NULL, " \n\t,")) != NULL) {
       /* log("[tok: %s] ", tok); */
-      int destID = strtol(tok, NULL, 10);
-      CFGNodePtr destBB = getCFGNodeForBB(destID);
-      srcBB->succs[srcBB->numSuccs] = destID;
-      srcBB->numSuccs++;
+      BBID destBBID = strtol(tok, NULL, 10);
+      PoolOffset destBBOffset = getCFGNodeForBB(destBBID);
+      CFGNode destBB = cfgNodePool[destBBOffset];
 
-      destBB->preds[destBB->numPreds] = srcID;
-      destBB->numPreds++;
+      srcBB.succs[srcBB.numSuccs] = destBBOffset;
+      srcBB.numSuccs++;
+
+      destBB.preds[destBB.numPreds] = srcBBOffset;
+      destBB.numPreds++;
       /* log("%d, ", id); */
     }
 
@@ -77,11 +88,17 @@ void parse_cgf_from_file(FILE *in) {
   }
 }
 
-static CFGNodePtr getCFGNodeForBB(int bbID) {
+/// Calculate dominance information as described in Section 9.2.1 of
+/// "Engineering a compiler", 2011
+static void calculateDominance() {
+
+}
+
+static int getCFGNodeForBB(BBID bbID) {
   for (int i=0 ; i<currentNumCFGNodes ; i++) {
     if (cfgNodePool[i].id == bbID) {
       /* log("Found node for %d\n", bbID); */
-      return (cfgNodePool + i);
+      return i;
     }
   }
 
@@ -101,7 +118,7 @@ static CFGNodePtr getCFGNodeForBB(int bbID) {
   cfgNodePool[currentNumCFGNodes].numSuccs = 0;
   cfgNodePool[currentNumCFGNodes].numPreds = 0;
   currentNumCFGNodes++;
-  return cfgNodePool + currentNumCFGNodes - 1;
+  return currentNumCFGNodes - 1;
 }
 
 static void release_memory(CFGNodePtr bb) {
