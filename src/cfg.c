@@ -5,9 +5,9 @@
 #include <assert.h>
 #include <math.h>
 
-#define MAX_SUCCESSORS    10
-#define MAX_PREDECESSORS  10
-#define MAX_DOMINATORS    10
+#define MAX_SUCCESSORS    16
+#define MAX_PREDECESSORS  16
+#define MAX_DOMINATORS    128
 #define MAX_SPEC_LINE_LEN 128
 
 #define log(msg, ...)                           \
@@ -23,6 +23,10 @@
 
 typedef int BBID;
 typedef int PoolOffset;
+typedef int bool;
+
+#define TRUE  1
+#define FALSE 0
 
 typedef struct CFGNode {
   BBID id;
@@ -50,6 +54,9 @@ static char cfgSpecLine[MAX_SPEC_LINE_LEN];
 
 static PoolOffset getCFGNodeForBB(BBID bbID);
 static void release_memory(CFGNodePtr bb);
+static void calculateDominance();
+static void calculateReversePostOrder(PoolOffset bbOffset, int *pot,
+                                      int *rpot, bool *visited);
 
 void parse_cgf_from_file(FILE *in) {
   if (cfgNodePool != NULL) {
@@ -68,30 +75,99 @@ void parse_cgf_from_file(FILE *in) {
     BBID srcBBID = strtol(tok, NULL, 10);
     /* log("%d: ", id); */
     PoolOffset srcBBOffset = getCFGNodeForBB(srcBBID);
-    CFGNode srcBB = cfgNodePool[srcBBOffset];
+    CFGNodePtr srcBB = cfgNodePool + srcBBOffset;
 
     while ((tok = strtok(NULL, " \n\t,")) != NULL) {
       /* log("[tok: %s] ", tok); */
       BBID destBBID = strtol(tok, NULL, 10);
       PoolOffset destBBOffset = getCFGNodeForBB(destBBID);
-      CFGNode destBB = cfgNodePool[destBBOffset];
+      CFGNodePtr destBB = cfgNodePool + destBBOffset;
 
-      srcBB.succs[srcBB.numSuccs] = destBBOffset;
-      srcBB.numSuccs++;
+      srcBB->succs[srcBB->numSuccs] = destBBOffset;
+      srcBB->numSuccs++;
 
-      destBB.preds[destBB.numPreds] = srcBBOffset;
-      destBB.numPreds++;
+      destBB->preds[destBB->numPreds] = srcBBOffset;
+      destBB->numPreds++;
       /* log("%d, ", id); */
     }
 
     /* log("\n"); */
   }
+
+  calculateDominance();
 }
 
 /// Calculate dominance information as described in Section 9.2.1 of
 /// "Engineering a compiler", 2011
+///
+/// FIXME: for now a very inefficient representation of sets a poor
+/// implementation of union-find is provided. Implement a better solution
+/// by following e.g. Chapter 21 in CLRS. Probably start a repo for
+/// something like the STL.
 static void calculateDominance() {
+  cfgNodePool[0].doms[0] = 0;
+  cfgNodePool[0].numDoms = 1;
 
+  for (int i=1 ; i<currentNumCFGNodes ; i++) {
+    // If the number of dominators of a BB is 0, then this BB is dominated
+    // by all other BBs. In other words, the number of dominators is
+    // actually currentNumCFGNodes.
+    //
+    // I did since I use fixed sized arrays with max sizes. The dominators
+    // set of and BB starts huge (includes all the BBs in the CFG) during
+    // the initialization step and then shrinks. Instead of unnecessarily
+    // creating huge sets of dominators an empty dominator set signals an
+    // including all set
+    cfgNodePool[i].numDoms = 0;
+  }
+
+  int *rpot = malloc(currentNumCFGNodes*sizeof(int));
+  bool *visited = malloc(currentNumCFGNodes*sizeof(bool));
+  int pot = 0;
+  calculateReversePostOrder(0, &pot, rpot, visited);
+
+  for (PoolOffset i=0 ; i<currentNumCFGNodes ; i++) {
+    log("%d -> %d\n", cfgNodePool[i].id, rpot[i]);
+  }
+
+  /* bool changed = TRUE; */
+
+  /* while(changed) { */
+  /*   changed = FALSE; */
+
+  /*   for (int i=1 ; i<currentNumCFGNodes ; i++) { */
+      
+  /*   } */
+  /* } */
+
+  free(rpot);
+  free(visited);
+}
+
+// pot is the post-order traversal index of the current node
+// rpot is a PoolOffset -> int map that specifies the reverse post order
+// traversal of the CFG
+static void calculateReversePostOrder(PoolOffset bbOffset, int *pot,
+                                      int *rpot, bool *visited) {
+  assert(bbOffset < currentNumCFGNodes && "Invalid BB");
+
+  if (visited[bbOffset]) {
+    return;
+  }
+
+  CFGNodePtr bb = cfgNodePool + bbOffset;
+  visited[bbOffset] = TRUE;
+  /* log("%d: numSuccs(%d)\n", bbOffset, bb->numSuccs); */
+
+  for (int i=0 ; i<bb->numSuccs ; i++) {
+    log("from %d to %d\n", cfgNodePool[bbOffset].id,
+        cfgNodePool[bb->succs[i]].id);
+    calculateReversePostOrder(bb->succs[i], pot, rpot, visited);
+  }
+
+  rpot[bbOffset] = currentNumCFGNodes - 1 - *pot;
+  log("%d -->> %d\n", bbOffset, *pot);
+  ++*pot;
 }
 
 static int getCFGNodeForBB(BBID bbID) {
