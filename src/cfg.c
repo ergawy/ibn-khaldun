@@ -17,8 +17,8 @@
 // https://gcc.gnu.org/onlinedocs/gcc-4.9.2/gcc/Typeof.html#Typeof
 // This equivalent to using C++11's auto keyword
 #define max(a,b)           \
-  ({ __auto_type _a = (a);        \
-     __auto_type _b = (b);        \
+  ({ __auto_type _a = (a); \
+     __auto_type _b = (b); \
      _a > _b ? _a : _b; })
 
 typedef int BBID;
