@@ -122,7 +122,7 @@ static void calculateDominance() {
   }
 
   int *rpot = malloc(currentNumCFGNodes*sizeof(int));
-  bool *visited = malloc(currentNumCFGNodes*sizeof(bool));
+  bool *visited = calloc(currentNumCFGNodes, sizeof(bool));
   int pot = 0;
   calculateReversePostOrder(0, &pot, rpot, visited);
 
