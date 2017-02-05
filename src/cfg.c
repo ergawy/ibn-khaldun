@@ -57,6 +57,9 @@ static void release_memory(CFGNodePtr bb);
 static void calculateDominance();
 static void calculateReversePostOrder(PoolOffset bbOffset, int *pot,
                                       int *rpot, bool *visited);
+static bool updateDomSet(PoolOffset bbOffset);
+static void intersectDomSets(PoolOffset *dest, int *destSize,
+                             PoolOffset *src, int *srcSize);
 
 void parse_cgf_from_file(FILE *in) {
   if (cfgNodePool != NULL) {
@@ -100,25 +103,21 @@ void parse_cgf_from_file(FILE *in) {
 /// Calculate dominance information as described in Section 9.2.1 of
 /// "Engineering a compiler", 2011
 ///
-/// FIXME: for now a very inefficient representation of sets a poor
-/// implementation of union-find is provided. Implement a better solution
-/// by following e.g. Chapter 21 in CLRS. Probably start a repo for
-/// something like the STL.
 static void calculateDominance() {
   cfgNodePool[0].doms[0] = 0;
   cfgNodePool[0].numDoms = 1;
 
   for (int i=1 ; i<currentNumCFGNodes ; i++) {
-    // If the number of dominators of a BB is 0, then this BB is dominated
-    // by all other BBs. In other words, the number of dominators is
-    // actually currentNumCFGNodes.
-    //
-    // I did since I use fixed sized arrays with max sizes. The dominators
-    // set of and BB starts huge (includes all the BBs in the CFG) during
-    // the initialization step and then shrinks. Instead of unnecessarily
-    // creating huge sets of dominators an empty dominator set signals an
-    // including all set
-    cfgNodePool[i].numDoms = 0;
+   // If the number of dominators of a BB is 0, then this BB is dominated
+   // by all other BBs. In other words, the number of dominators is
+   // actually currentNumCFGNodes.
+   //
+   // I did since I use fixed sized arrays with max sizes. The dominators
+   // set of and BB starts huge (includes all the BBs in the CFG) during
+   // the initialization step and then shrinks. Instead of unnecessarily
+   // creating huge sets of dominators an empty dominator set signals an
+   // including all set
+   cfgNodePool[i].numDoms = 0;
   }
 
   int *rpot = malloc(currentNumCFGNodes*sizeof(int));
@@ -126,26 +125,116 @@ static void calculateDominance() {
   int pot = 0;
   calculateReversePostOrder(0, &pot, rpot, visited);
 
-  for (PoolOffset i=0 ; i<currentNumCFGNodes ; i++) {
-    log("%d -> %d\n", cfgNodePool[i].id, rpot[i]);
-  }
-
-  /* bool changed = TRUE; */
-
-  /* while(changed) { */
-  /*   changed = FALSE; */
-
-  /*   for (int i=1 ; i<currentNumCFGNodes ; i++) { */
-      
+  /* for (int i=0 ; i<currentNumCFGNodes ; i++) { */
+  /*   CFGNodePtr n = cfgNodePool + i; */
+  /*   log("Preds of %d: ", n->id); */
+  /*   for (int j=0 ; j<n->numPreds ; j++) { */
+  /*     log("%d, ", cfgNodePool[n->preds[j]].id); */
   /*   } */
+  /*   log("\n"); */
+
+  /*   log("Succs of %d: ", n->id); */
+  /*   for (int j=0 ; j<n->numSuccs ; j++) { */
+  /*     log("%d, ", cfgNodePool[n->succs[j]].id); */
+  /*   } */
+  /*   log("\n"); */
   /* } */
+
+  /* for (PoolOffset i=0 ; i<currentNumCFGNodes ; i++) { */
+  /*   log("%d -> %d\n", i, cfgNodePool[rpot[i]].id); */
+  /* } */
+
+  bool changed = TRUE;
+
+  while(changed) {
+    changed = FALSE;
+    for (int i=0 ; i<currentNumCFGNodes ; i++) {
+      changed |= updateDomSet(rpot[i]);
+    }
+
+
+    for (int i=1 ; i<currentNumCFGNodes ; i++) {
+      log("Dom set for BB %d:\n", i);
+      for (int j=0 ; j<cfgNodePool[i].numDoms ; j++) {
+        log("%d, ", cfgNodePool[i].doms[j]);
+      }
+      log("\n");
+    }
+
+    break;
+  }
 
   free(rpot);
   free(visited);
 }
 
+/// FIXME: for now a very inefficient representation of sets a poor
+/// implementation of union-find is provided. Implement a better solution
+/// by following e.g. Chapter 21 in CLRS. Probably start a repo for
+/// something like the STL.
+static bool updateDomSet(PoolOffset bbOffset) {
+  CFGNodePtr n = cfgNodePool + bbOffset;
+  int oldNumDoms = n->numDoms;
+
+  for (int i=0 ; i<n->numPreds ; i++) {
+    CFGNodePtr pred = cfgNodePool + n->preds[i];
+    log("Intersecting %d with %d\n", n->id, pred->id);
+    /* for (int j=0 ; j<n->numDoms ; j++) { */
+    /*   log("%d, ", cfgNodePool[n->doms[j]].id); */
+    /* } */
+    /* log("\n*************\n"); */
+    intersectDomSets(n->doms, &(n->numDoms), pred->doms,
+                     &(pred->numDoms));
+    /* for (int j=0 ; j<n->numDoms ; j++) { */
+    /*   log("%d, ", cfgNodePool[n->doms[j]].id); */
+    /* } */
+    /* log("\n*************\n"); */
+  }
+
+  for (int i=0 ; i<n->numDoms ; i++) {
+    if (n->doms[i] == bbOffset) {
+      /* log("found element\n"); */
+      return n->numDoms == oldNumDoms;
+    }
+  }
+  log("dom size: %d\n", n->numDoms);
+  n->doms[n->numDoms] = bbOffset;
+  n->numDoms++;
+  log("dom size: %d\n", n->numDoms);
+  for (int j=0 ; j<n->numDoms ; j++) {
+    log("%d, ", cfgNodePool[n->doms[j]].id);
+  }
+  log("\n*************\n");
+  return FALSE;
+}
+
+static void intersectDomSets(PoolOffset *dest, int *destSize,
+                             PoolOffset *src, int *srcSize) {
+  // if dest is the full set, then just copy the src set
+  if (*destSize == 0) {
+    *destSize = *srcSize;
+    memcpy(dest, src, *srcSize * sizeof(PoolOffset));
+    log("new size: %d\n", *destSize);
+    return;
+  }
+
+  PoolOffset res[MAX_DOMINATORS];
+  int resSize = 0;
+
+  for (int i=0 ; i<*destSize ; i++) {
+    for (int j=0 ; j<*srcSize ; j++) {
+      if (dest[i] == src[j]) {
+        res[resSize++] = dest[i];
+      }
+    }
+  }
+
+  *destSize = resSize;
+  memcpy(dest, res, resSize * sizeof(PoolOffset));
+}
+
 // pot is the post-order traversal index of the current node
-// rpot is a PoolOffset -> int map that specifies the reverse post order
+// rpot is a int -> PoolOffset map that specifies the reverse post order
 // traversal of the CFG
 static void calculateReversePostOrder(PoolOffset bbOffset, int *pot,
                                       int *rpot, bool *visited) {
@@ -160,13 +249,14 @@ static void calculateReversePostOrder(PoolOffset bbOffset, int *pot,
   /* log("%d: numSuccs(%d)\n", bbOffset, bb->numSuccs); */
 
   for (int i=0 ; i<bb->numSuccs ; i++) {
-    log("from %d to %d\n", cfgNodePool[bbOffset].id,
-        cfgNodePool[bb->succs[i]].id);
+    /* log("from %d to %d\n", cfgNodePool[bbOffset].id, */
+    /*     cfgNodePool[bb->succs[i]].id); */
     calculateReversePostOrder(bb->succs[i], pot, rpot, visited);
   }
 
-  rpot[bbOffset] = currentNumCFGNodes - 1 - *pot;
-  log("%d -->> %d\n", bbOffset, *pot);
+  rpot[currentNumCFGNodes-1-*pot] = bbOffset;
+  /* log("%d -->> %d\n", (currentNumCFGNodes-1-*pot), */
+      /* bb->id); */
   ++*pot;
 }
 
