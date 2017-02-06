@@ -61,6 +61,7 @@ static bool update_dom_set(PoolOffset bbOffset);
 static void intersect_dom_sets(PoolOffset *dest, int *destSize,
                              PoolOffset *src, int *srcSize);
 static void print_cfg_node(PoolOffset bbOffset);
+static void print_dom_set(char* setName, PoolOffset* set, int setSize);
 
 void parse_cgf_from_file(FILE *in) {
   if (cfgNodePool != NULL) {
@@ -131,8 +132,11 @@ static void calculate_dominance() {
     // traversal.
     for (int i=1 ; i<currentNumCFGNodes ; i++) {
       changed |= update_dom_set(rpot[i]);
-      print_cfg_node(rpot[i]);
     }
+  }
+
+  for (int i=0 ; i<currentNumCFGNodes ; i++) {
+    print_cfg_node(rpot[i]);
   }
 
   free(rpot);
@@ -180,30 +184,7 @@ static bool update_dom_set(PoolOffset bbOffset) {
 }
 
 static void intersect_dom_sets(PoolOffset *dest, int *destSize,
-                             PoolOffset *src, int *srcSize) {
-  log("##################\n");
-  log("Intersecting 2 sets:\n");
-  log("\tfirst set: [");
-  if (*destSize == 0) {
-    log("FULL SET");
-  } else {
-    for (int i=0 ; i<*destSize ; i++) {
-      log("%d", cfgNodePool[dest[i]].id);
-      log(i<(*destSize)-1 ? ", " : "");
-    }
-  }
-  log("]\n");
-  log("\tsecond set: [");
-  if (*srcSize == 0) {
-    log("FULL SET");
-  } else {
-    for (int i=0 ; i<*srcSize ; i++) {
-      log("%d", cfgNodePool[src[i]].id);
-      log(i<(*srcSize)-1 ? ", " : "");
-    }
-  }
-  log("]\n");
-
+                             PoolOffset *src, int *srcSize) {  
   // if dest is the full set, then just copy the src set
   if (*destSize == 0) {
     *destSize = *srcSize;
@@ -225,18 +206,6 @@ static void intersect_dom_sets(PoolOffset *dest, int *destSize,
     *destSize = resSize;
     memcpy(dest, res, resSize * sizeof(PoolOffset)); 
   }
-
-  log("\tresult: [");
-  if (*destSize == 0) {
-    log("FULL SET");
-  } else {
-    for (int i=0 ; i<*destSize ; i++) {
-      log("%d", cfgNodePool[dest[i]].id);
-      log(i<(*destSize)-1 ? ", " : "");
-    }
-  }
-  log("]\n");
-  log("$$$$$$$$$$$$$$$$$$\n");
 }
 
 // pot is the post-order traversal index of the current node
@@ -322,4 +291,17 @@ static void print_cfg_node(PoolOffset bbOffset) {
   log("]\n");
 
   log("------------------\n");
+}
+
+static void print_dom_set(char* setName, PoolOffset* set, int setSize) {
+  log("\t%s: [", setName);
+  if (setSize == 0) {
+    log("FULL SET");
+  } else {
+    for (int i=0 ; i<setSize ; i++) {
+      log("%d", cfgNodePool[set[i]].id);
+      log(i<(setSize)-1 ? ", " : "");
+    }
+  }
+  log("]\n"); 
 }
